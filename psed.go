@@ -68,15 +68,7 @@ func main() {
 		case bytes.Equal(c, []byte{4}):
 			return
 		case bytes.Equal(c, []byte{13}): // newline
-			if mode == WORD {
-				maskedLine := ""
-				words := strings.Split(lines[cursor.y], " ")
-				for _, word := range words {
-					runeCount := utf8.RuneCountInString(word)
-					maskedLine += strings.Repeat("*", runeCount) + " "
-				}
-				fmt.Fprintf(os.Stderr, "\r%s", maskedLine+" ")
-			}
+			maskEntireLine()
 			lines = append(lines, "")
 			cursor.x = 0
 			cursor.y++
@@ -189,4 +181,16 @@ func printMaskLine() {
 	}
 	fmt.Fprintf(os.Stderr, "\r%s", line+" ")
 	fmt.Fprintf(os.Stderr, "\033[%vG", cursor.x+1)
+}
+
+func maskEntireLine() {
+	if mode == WORD {
+		maskedLine := ""
+		words := strings.Split(lines[cursor.y], " ")
+		for _, word := range words {
+			runeCount := utf8.RuneCountInString(word)
+			maskedLine += strings.Repeat("*", runeCount) + " "
+		}
+		fmt.Fprintf(os.Stderr, "\r%s", maskedLine+" ")
+	}
 }
