@@ -99,6 +99,7 @@ func main() {
 				fmt.Fprint(os.Stderr, "\033[1D")
 			} else {
 				if cursor.y > 0 {
+					maskEntireLine()
 					cursor.y--
 					cursor.x = len(lines[cursor.y])
 					fmt.Fprintf(os.Stderr, "\033[1A\033[%vG", cursor.x+1)
@@ -109,6 +110,7 @@ func main() {
 				cursor.x++
 				if cursor.x > len(lines[cursor.y]) {
 					if cursor.y < len(lines)-1 {
+						maskEntireLine()
 						cursor.x = 0
 						cursor.y++
 						fmt.Fprint(os.Stderr, "\033[1E")
