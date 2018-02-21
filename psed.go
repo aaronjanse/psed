@@ -7,9 +7,16 @@ import (
 	"log"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/pkg/term"
 )
+
+const (
+	WORD int = 1
+)
+
+var mode = WORD
 
 func getch() []byte {
 	t, _ := term.Open("/dev/tty")
@@ -30,6 +37,7 @@ type Cursor struct {
 }
 
 var lines = []string{""}
+var cursor = Cursor{0, 0}
 
 func init() {
 	stat, _ := os.Stdin.Stat()
@@ -48,11 +56,11 @@ func init() {
 }
 
 func main() {
-	cursor := Cursor{0, 0}
 	defer func() {
 		fmt.Println(strings.Join(lines, "\n"))
 	}()
 	for {
+		printMaskLine()
 		c := getch()
 		switch {
 		case bytes.Equal(c, []byte{3}):
@@ -60,6 +68,15 @@ func main() {
 		case bytes.Equal(c, []byte{4}):
 			return
 		case bytes.Equal(c, []byte{13}): // newline
+			if mode == WORD {
+				maskedLine := ""
+				words := strings.Split(lines[cursor.y], " ")
+				for _, word := range words {
+					runeCount := utf8.RuneCountInString(word)
+					maskedLine += strings.Repeat("*", runeCount) + " "
+				}
+				fmt.Fprintf(os.Stderr, "\r%s", maskedLine+" ")
+			}
 			lines = append(lines, "")
 			cursor.x = 0
 			cursor.y++
@@ -126,10 +143,23 @@ func main() {
 				cursor.x = len(lines[cursor.y])
 				fmt.Fprintf(os.Stderr, "\033[%vG", cursor.x+1)
 			}
-		case bytes.Compare(c, []byte{32}) >= 0 && bytes.Compare(c, []byte{127}) <= 0: // printable chars
+		case bytes.Compare(c, []byte{32}) > 0 && bytes.Compare(c, []byte{127}) <= 0: // printable chars
 			cursor.x++
 			lines[cursor.y] += string(c)
 			fmt.Fprint(os.Stderr, string(c))
+		case bytes.Equal(c, []byte{32}):
+			if mode == WORD {
+				line := lines[cursor.y]
+				words := strings.Split(line, " ")
+				lastWord := words[len(words)-1]
+				runeCount := utf8.RuneCountInString(lastWord)
+				fmt.Fprintf(os.Stderr, "\033[%vD", runeCount)          // move cursor back
+				fmt.Fprintf(os.Stderr, strings.Repeat("*", runeCount)) // replace word with astricks
+			}
+
+			lines[cursor.y] += " "
+			cursor.x++
+			fmt.Fprint(os.Stderr, " ")
 		case bytes.Equal(c, []byte{9}):
 			fmt.Fprint(os.Stderr, "\t")
 		default:
@@ -137,4 +167,26 @@ func main() {
 			// fmt.Fprintln(os.Stderr, c)
 		}
 	}
+}
+
+func printMaskLine() {
+	line := lines[cursor.y]
+	if mode == WORD {
+		maskedLine := ""
+		currentX := 0
+		words := strings.Split(line, " ")
+		for _, word := range words {
+			runeCount := utf8.RuneCountInString(word)
+			if currentX <= cursor.x && cursor.x <= currentX+runeCount {
+				maskedLine += word
+			} else {
+				maskedLine += strings.Repeat("*", runeCount)
+			}
+			maskedLine += " "
+			currentX += runeCount + 1
+		}
+		line = maskedLine
+	}
+	fmt.Fprintf(os.Stderr, "\r%s", line+" ")
+	fmt.Fprintf(os.Stderr, "\033[%vG", cursor.x+1)
 }
