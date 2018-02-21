@@ -121,6 +121,7 @@ func main() {
 			}
 		case bytes.Equal(c, []byte{27, 91, 65}): // up
 			if cursor.y > 0 {
+				maskEntireLine()
 				cursor.y--
 				fmt.Fprint(os.Stderr, "\033[1A")
 			}
@@ -130,6 +131,7 @@ func main() {
 			}
 		case bytes.Equal(c, []byte{27, 91, 66}): // down
 			if cursor.y < len(lines)-1 {
+				maskEntireLine()
 				cursor.y++
 				fmt.Fprint(os.Stderr, "\033[1B")
 			}
