@@ -60,7 +60,7 @@ func main() {
 		fmt.Println(strings.Join(lines, "\n"))
 	}()
 	for {
-		printMaskLine()
+		printCurrentMaskedLine()
 		c := getch()
 		switch {
 		case bytes.Equal(c, []byte{3}):
@@ -68,12 +68,33 @@ func main() {
 		case bytes.Equal(c, []byte{4}):
 			return
 		case bytes.Equal(c, []byte{13}): // newline
+			if cursor.y < len(lines)-1 {
+				lines = append(lines[:cursor.y+1], append([]string{" "}, lines[cursor.y+1:]...)...)
+			} else {
+				lines = append(lines, "")
+			}
+
+			// clear line after cursor
+			fmt.Fprint(os.Stderr, strings.Repeat(" ", utf8.RuneCountInString(lines[cursor.y][cursor.x:])))
+			if cursor.x < len(lines[cursor.y]) {
+				lines[cursor.y+1] = lines[cursor.y][cursor.x:]
+				lines[cursor.y] = lines[cursor.y][:cursor.x]
+			}
+			fmt.Fprint(os.Stderr, "\033[1G")
 			maskEntireLine()
-			lines = append(lines, "")
+
+			fmt.Fprint(os.Stderr, "\033[1E")
+			for _, line := range lines[cursor.y+1:] {
+				printMaskedLine(line)
+				fmt.Fprint(os.Stderr, "\033[1E")
+			}
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprint(os.Stderr, "\033[36m~\033[39m")
+
+			fmt.Fprintf(os.Stderr, "\033[%vA", len(lines)-cursor.y-1)
+
 			cursor.x = 0
 			cursor.y++
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprint(os.Stderr, " \033[1D")
 		case bytes.Equal(c, []byte{127}): // backspace
 			if cursor.x > 0 {
 				lines[cursor.y] = lines[cursor.y][:cursor.x-1] + lines[cursor.y][cursor.x:]
@@ -158,6 +179,14 @@ func main() {
 			fmt.Fprint(os.Stderr, " ")
 		case bytes.Equal(c, []byte{9}):
 			fmt.Fprint(os.Stderr, "\t")
+		case bytes.Equal(c, []byte{27}):
+			fmt.Fprintf(os.Stderr, "\033[%vF\033[1E", cursor.y+1)
+			for _, line := range lines {
+				fmt.Fprintln(os.Stderr, line+strings.Repeat(" ", utf8.RuneCountInString(line)))
+			}
+			fmt.Fprint(os.Stderr, "\033[36m~\033[39m"+strings.Repeat(" ", len(lines[len(lines)-1])))
+			fmt.Fprintf(os.Stderr, "\033[%vF", len(lines)-cursor.y)
+			fmt.Fprintf(os.Stderr, "\033[%vG", cursor.x+1)
 		default:
 			// fmt.Fprintln(os.Stderr, "")
 			// fmt.Fprintln(os.Stderr, c)
@@ -165,7 +194,7 @@ func main() {
 	}
 }
 
-func printMaskLine() {
+func printCurrentMaskedLine() {
 	line := lines[cursor.y]
 	if mode == WORD {
 		maskedLine := ""
@@ -185,6 +214,19 @@ func printMaskLine() {
 	}
 	fmt.Fprintf(os.Stderr, "\r%s", line+" ")
 	fmt.Fprintf(os.Stderr, "\033[%vG", cursor.x+1)
+}
+
+func printMaskedLine(line string) {
+	if mode == WORD {
+		maskedLine := ""
+		words := strings.Split(line, " ")
+		for _, word := range words {
+			runeCount := utf8.RuneCountInString(word)
+			maskedLine += strings.Repeat("*", runeCount) + " "
+		}
+		line = maskedLine
+	}
+	fmt.Fprintf(os.Stderr, "%s", line)
 }
 
 func maskEntireLine() {
