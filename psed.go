@@ -9,10 +9,12 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"./ansi"
 	"github.com/pkg/term"
 )
 
 const (
+	NONE int = 0
 	WORD int = 1
 )
 
@@ -40,6 +42,9 @@ var lines = []string{""}
 var cursor = Cursor{0, 0}
 
 func init() {
+	ansi.ClearScreen()
+	ansi.SetCursor(0, 0)
+
 	stat, _ := os.Stdin.Stat()
 	if (stat.Mode() & os.ModeCharDevice) == 0 { // data is being piped from stdin
 		bytes, err := ioutil.ReadAll(os.Stdin)
@@ -49,10 +54,17 @@ func init() {
 
 		lines = strings.Split(string(bytes), "\n")
 		for _, line := range lines {
-			fmt.Fprintln(os.Stderr, line)
+			printMaskedLine(line)
+			fmt.Fprintln(os.Stderr)
+			cursor.y++
 		}
-		fmt.Fprintf(os.Stderr, "\033[%vF\033[0G", len(lines))
+		lines = append(lines, "")
+		// fmt.Fprintf(os.Stderr, "\033[%vF\033[0G", len(lines))
 	}
+
+	// fmt.Println()
+	// fmt.Fprint(os.Stderr, "\033[36m~\033[39m")
+	// fmt.Fprintf(os.Stderr, "\033[1F")
 }
 
 func main() {
@@ -68,33 +80,49 @@ func main() {
 		case bytes.Equal(c, []byte{4}):
 			return
 		case bytes.Equal(c, []byte{13}): // newline
-			if cursor.y < len(lines)-1 {
-				lines = append(lines[:cursor.y+1], append([]string{" "}, lines[cursor.y+1:]...)...)
-			} else {
+			// are we appending a line to the end or adding one to the middle?
+			if cursor.y >= len(lines)-1 {
 				lines = append(lines, "")
+				println()
+
+				cursor.x = 0
+				cursor.y++
+			} else {
+				splittingLine := cursor.x < len(lines[cursor.y])
+
+				lines = append(lines[:cursor.y+1], append([]string{""}, lines[cursor.y+1:]...)...)
+
+				if splittingLine {
+					// clear line after cursor
+					ansi.SetCursorX(0)
+					fmt.Fprint(os.Stderr, strings.Repeat(" ", utf8.RuneCountInString(lines[cursor.y])))
+
+					// split the line; the order of these statements matter!
+					lines[cursor.y+1] = lines[cursor.y][cursor.x:]
+					lines[cursor.y] = lines[cursor.y][:cursor.x]
+
+					// mask original line
+					ansi.SetCursorX(0)
+					printMaskedLine(lines[cursor.y])
+
+					cursor.x = 0
+					cursor.y++
+
+					// now, we just need to reprint the lines after the original line
+					for y, line := range lines[cursor.y:] {
+						ansi.MoveCursorDown(1)
+						ansi.SetCursorX(0)
+
+						// clear line that used to be here
+						print(strings.Repeat(" ", utf8.RuneCountInString(lines[cursor.y+y-1])))
+						ansi.SetCursorX(0)
+
+						printMaskedLine(line)
+					}
+
+					ansi.MoveCursorUp(len(lines[cursor.y:]) - 1)
+				}
 			}
-
-			// clear line after cursor
-			fmt.Fprint(os.Stderr, strings.Repeat(" ", utf8.RuneCountInString(lines[cursor.y][cursor.x:])))
-			if cursor.x < len(lines[cursor.y]) {
-				lines[cursor.y+1] = lines[cursor.y][cursor.x:]
-				lines[cursor.y] = lines[cursor.y][:cursor.x]
-			}
-			fmt.Fprint(os.Stderr, "\033[1G")
-			maskEntireLine()
-
-			fmt.Fprint(os.Stderr, "\033[1E")
-			for _, line := range lines[cursor.y+1:] {
-				printMaskedLine(line)
-				fmt.Fprint(os.Stderr, "\033[1E")
-			}
-			fmt.Fprintln(os.Stderr)
-			fmt.Fprint(os.Stderr, "\033[36m~\033[39m")
-
-			fmt.Fprintf(os.Stderr, "\033[%vA", len(lines)-cursor.y-1)
-
-			cursor.x = 0
-			cursor.y++
 		case bytes.Equal(c, []byte{127}): // backspace
 			if cursor.x > 0 {
 				lines[cursor.y] = lines[cursor.y][:cursor.x-1] + lines[cursor.y][cursor.x:]
@@ -109,6 +137,7 @@ func main() {
 				for _, line := range lines {
 					fmt.Fprintln(os.Stderr, line)
 				}
+
 				fmt.Fprint(os.Stderr, "\033[36m~\033[39m"+strings.Repeat(" ", len(lines[len(lines)-1])))
 				fmt.Fprintf(os.Stderr, "\033[%vF\033[%vG", len(lines)-cursor.y+1, oldLen+1)
 				cursor.x = oldLen
@@ -142,24 +171,36 @@ func main() {
 			}
 		case bytes.Equal(c, []byte{27, 91, 65}): // up
 			if cursor.y > 0 {
-				maskEntireLine()
+				// conceal original line
+				ansi.SetCursorX(0)
+				printMaskedLine(lines[cursor.y])
+
+				ansi.MoveCursorUp(1)
 				cursor.y--
-				fmt.Fprint(os.Stderr, "\033[1A")
 			}
+
+			// don't go past the end of the line
 			if cursor.x > len(lines[cursor.y]) {
 				cursor.x = len(lines[cursor.y])
-				fmt.Fprintf(os.Stderr, "\033[%vG", cursor.x+1)
 			}
+
+			ansi.SetCursorX(cursor.x)
 		case bytes.Equal(c, []byte{27, 91, 66}): // down
 			if cursor.y < len(lines)-1 {
-				maskEntireLine()
+				// conceal original line
+				ansi.SetCursorX(0)
+				printMaskedLine(lines[cursor.y])
+
+				ansi.MoveCursorDown(1)
 				cursor.y++
-				fmt.Fprint(os.Stderr, "\033[1B")
 			}
-			if cursor.x >= len(lines[cursor.y]) {
+
+			// don't go past the end of the line
+			if cursor.x > len(lines[cursor.y]) {
 				cursor.x = len(lines[cursor.y])
-				fmt.Fprintf(os.Stderr, "\033[%vG", cursor.x+1)
 			}
+
+			ansi.SetCursorX(cursor.x)
 		case bytes.Compare(c, []byte{32}) > 0 && bytes.Compare(c, []byte{127}) <= 0: // printable chars
 			cursor.x++
 			lines[cursor.y] += string(c)
@@ -213,7 +254,7 @@ func printCurrentMaskedLine() {
 		line = maskedLine
 	}
 	fmt.Fprintf(os.Stderr, "\r%s", line+" ")
-	fmt.Fprintf(os.Stderr, "\033[%vG", cursor.x+1)
+	ansi.SetCursorX(cursor.x)
 }
 
 func printMaskedLine(line string) {
@@ -230,7 +271,9 @@ func printMaskedLine(line string) {
 }
 
 func maskEntireLine() {
-	if mode == WORD {
+	if mode == NONE {
+		fmt.Fprintf(os.Stderr, "\r%s", lines[cursor.y])
+	} else if mode == WORD {
 		maskedLine := ""
 		words := strings.Split(lines[cursor.y], " ")
 		for _, word := range words {
@@ -239,4 +282,16 @@ func maskEntireLine() {
 		}
 		fmt.Fprintf(os.Stderr, "\r%s", maskedLine+" ")
 	}
+}
+
+func print(s string) {
+	fmt.Fprint(os.Stderr, s)
+}
+
+func printf(s string, a ...interface{}) {
+	fmt.Fprintf(os.Stderr, s, a...)
+}
+
+func println() {
+	print("\n")
 }
